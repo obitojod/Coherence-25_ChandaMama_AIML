@@ -1,0 +1,64 @@
+{
+    "job_posting": {
+      "job_id": "JD12345",
+      "role": "Software Engineer",
+      "experience_required": {
+        "minimum": 2,
+        "maximum": 5,
+        "preferred_industry": "IT Services"
+      },
+      "notice_period": {
+        "required": "Immediate to 30 days",
+        "preferred": "15 days"
+      },
+      "location": {
+        "city": "Bangalore",
+        "state": "Karnataka",
+        "country": "India",
+        "remote_option": "Hybrid"
+      },
+      "stipend": {
+        "type": "Fixed + Performance-based",
+        "amount": {
+          "fixed": 50000,
+          "bonus": 10000
+        },
+        "currency": "INR"
+      },
+      "employment_type": "Full-time",
+      "job_description": "Develop and maintain web applications using MERN stack.",
+      "required_skills": [
+        "JavaScript",
+        "React.js",
+        "Node.js",
+        "MongoDB",
+        "Express.js"
+      ],
+      "preferred_skills": [
+        "AWS",
+        "Docker",
+        "Kubernetes"
+      ],
+      "qualifications": [
+        "B.E/B.Tech in Computer Science or related field",
+        "Relevant certifications (if any)"
+      ],
+      "benefits": [
+        "Health Insurance",
+        "Flexible Work Hours",
+        "Annual Bonus"
+      ],
+      "selection_process": [
+        "Resume Shortlisting",
+        "Technical Interview",
+        "HR Interview"
+      ],
+      "contact_details": {
+        "hr_name": "Amit Sharma",
+        "email": "hr@company.com",
+        "phone": "+91-9876543210"
+      },
+      "application_deadline": "2025-04-15"
+    }
+    
+  }
