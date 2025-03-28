@@ -7,9 +7,175 @@ const path = require("path");
 const multer = require("multer");
 const aws = require("aws-sdk");
 const fs = require("fs");
+const axios = require("axios");
+const pdfParse = require("pdf-parse");
 
 // Important - load env variables first
 require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
+
+// Gemini AI Integration
+const GEMINI_API_KEY =
+  process.env.GEMINI_API_KEY || "AIzaSyDEz-z1SYaOVqyNZiF-A1HFdJH8Lng7mBs";
+
+// Function to extract text from the PDF buffer
+async function extractTextFromPDF(pdfBuffer) {
+  try {
+    const data = await pdfParse(pdfBuffer);
+    return data.text;
+  } catch (error) {
+    console.error("Error extracting text from PDF:", error);
+    return null;
+  }
+}
+
+// Function to extract structured data from resume text using Gemini AI
+async function getStructuredDataFromGemini(text) {
+  console.log("Extracting structured data from resume with Gemini...");
+  const url =
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=" +
+    GEMINI_API_KEY;
+
+  const prompt = `
+    Extract structured information from the following resume and return it in JSON format:
+    - Full Name
+    - Contact Information (Phone, Email, LinkedIn, Address)
+    - Skills (as an array)
+    - Education (Degree, University, Year)
+    - Work Experience (as an array of objects with Company, Role, Duration including years/months)
+    - Projects (Title, Description, Technologies Used)
+    - Certifications
+    
+    Resume Text:
+    """${text}"""
+    
+    Return only valid JSON output, without any additional text or explanations.
+  `;
+
+  try {
+    const response = await axios.post(url, {
+      contents: [{ parts: [{ text: prompt }] }],
+    });
+
+    let reply = response.data.candidates[0].content.parts[0].text;
+    reply = reply
+      .replace(/```json/g, "")
+      .replace(/```/g, "")
+      .trim();
+
+    return JSON.parse(reply);
+  } catch (error) {
+    console.error(
+      "Error fetching data from Gemini API:",
+      error.response ? error.response.data : error.message
+    );
+    return null;
+  }
+}
+
+// Function to calculate total experience from work history
+function calculateTotalExperience(workExperience) {
+  let totalYears = 0;
+  if (Array.isArray(workExperience)) {
+    workExperience.forEach((exp) => {
+      const duration = exp.Duration || "";
+      const years = duration.match(/(\d+)\s*years?/i);
+      const months = duration.match(/(\d+)\s*months?/i);
+
+      if (years) totalYears += parseInt(years[1]);
+      if (months) totalYears += parseInt(months[1]) / 12;
+    });
+  }
+  return Math.round(totalYears * 10) / 10; // Round to 1 decimal place
+}
+
+// Function to score resume using Gemini AI
+async function scoreResumeWithGemini(resumeData, jobRequirements) {
+  console.log("Scoring resume with Gemini AI...");
+  const url =
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=" +
+    GEMINI_API_KEY;
+
+  const prompt = `
+    You are an AI HR assistant. Score this candidate's resume based on the job requirements.
+    Score each factor strictly out of 100 points. The final score will be the average.
+
+    Job Requirements:
+    ${JSON.stringify(jobRequirements, null, 2)}
+
+    Candidate's Resume Data:
+    ${JSON.stringify(resumeData, null, 2)}
+
+    Score these factors strictly, considering exact matches and relevance:
+
+    1. Skills Match (0-100):
+    - Give points based on exact matches with required skills
+    - Consider relevance and proficiency level
+    - Deduct points for missing critical skills
+    
+    2. Experience Score (0-100):
+    - Compare years of experience with requirement
+    - Evaluate relevance of past roles
+    - Consider industry-specific experience
+    
+    3. Education Match (0-100):
+    - Score based on degree relevance
+    - Consider university tier
+    - Additional certifications
+    
+    4. Notice Period Score (0-100):
+    - 100 points if notice period matches requirement
+    - Deduct points proportionally for longer notice periods
+    - Consider immediate joiners if preferred
+    
+    5. Overall Profile Score (0-100):
+    - Project relevance
+    - Industry alignment
+    - Additional achievements
+    
+    Return only valid JSON in this format:
+    {
+        "breakdown": {
+            "skills_score": number (0-100),
+            "experience_score": number (0-100),
+            "education_score": number (0-100),
+            "notice_period_score": number (0-100),
+            "overall_profile_score": number (0-100)
+        },
+        "final_score": number (average of all scores),
+        "detailed_reasoning": {
+            "skills_analysis": string,
+            "experience_analysis": string,
+            "education_analysis": string,
+            "notice_period_analysis": string,
+            "overall_analysis": string
+        }
+    }
+  `;
+
+  try {
+    const response = await axios.post(url, {
+      contents: [{ parts: [{ text: prompt }] }],
+    });
+
+    let reply = response.data.candidates[0].content.parts[0].text;
+    reply = reply
+      .replace(/```json/g, "")
+      .replace(/```/g, "")
+      .trim();
+    const result = JSON.parse(reply);
+
+    // Ensure final score is average of all scores
+    const scores = Object.values(result.breakdown);
+    result.final_score = Math.round(
+      scores.reduce((a, b) => a + b, 0) / scores.length
+    );
+
+    return result;
+  } catch (error) {
+    console.error("Error in AI scoring:", error);
+    return null;
+  }
+}
 
 // AWS S3 Configuration
 const s3 = new aws.S3({
@@ -133,6 +299,29 @@ const formSchema = new mongoose.Schema({
     type: [Object],
     required: true,
   },
+  hrRequirements: {
+    job_id: String,
+    role: String,
+    experience_required: {
+      minimum: Number,
+      maximum: Number,
+      preferred_industry: String,
+    },
+    notice_period: {
+      required: String,
+      preferred: String,
+    },
+    location: {
+      city: String,
+      state: String,
+      country: String,
+      remote_option: String,
+    },
+    required_skills: [String],
+    preferred_skills: [String],
+    qualifications: [String],
+    job_description: String,
+  },
   createdAt: {
     type: Date,
     default: Date.now,
@@ -154,6 +343,23 @@ const submissionSchema = new mongoose.Schema({
     },
   ],
   resumeUrl: String,
+  aiEvaluation: {
+    breakdown: {
+      skills_score: Number,
+      experience_score: Number,
+      education_score: Number,
+      notice_period_score: Number,
+      overall_profile_score: Number,
+    },
+    final_score: Number,
+    detailed_reasoning: {
+      skills_analysis: String,
+      experience_analysis: String,
+      education_analysis: String,
+      notice_period_analysis: String,
+      overall_analysis: String,
+    },
+  },
   submittedAt: {
     type: Date,
     default: Date.now,
@@ -390,7 +596,7 @@ app.post("/api/forms", auth, async (req, res) => {
     // Log the entire request body for debugging
     console.log("Request body received for form creation");
 
-    const { title, description, fields } = req.body;
+    const { title, description, fields, hrRequirements } = req.body;
 
     // Validate required data
     if (!title) {
@@ -423,12 +629,14 @@ app.post("/api/forms", auth, async (req, res) => {
       options: field.options || [],
     }));
 
+    // Create the form with HR requirements if provided
     const newForm = new Form({
       userId,
       title,
       description: description || "",
       fields: processedFields,
       publicLink,
+      hrRequirements: hrRequirements || null,
     });
 
     const savedForm = await newForm.save();
@@ -552,6 +760,12 @@ app.post(
       const formId = req.params.formId;
       console.log(`Form submission received for form ID: ${formId}`);
 
+      // First, fetch the form to get HR requirements
+      const form = await Form.findById(formId);
+      if (!form) {
+        return res.status(404).json({ message: "Form not found" });
+      }
+
       // Log file information if a file was uploaded
       if (req.file) {
         console.log("FILE RECEIVED ✓");
@@ -581,6 +795,7 @@ app.post(
 
       // Initialize resumeUrl variable
       let resumeUrl = null;
+      let aiEvaluation = null;
 
       // If a file was uploaded, upload it to S3
       if (req.file) {
@@ -593,6 +808,65 @@ app.post(
 
           const fileContent = fs.readFileSync(req.file.path);
           console.log(`Read ${fileContent.length} bytes from temp file`);
+
+          // Process resume with Gemini AI if HR requirements are present
+          if (form.hrRequirements) {
+            try {
+              console.log("Starting Gemini AI resume processing...");
+              // Extract text from the PDF
+              const resumeText = await extractTextFromPDF(fileContent);
+
+              if (resumeText) {
+                // Get structured data from the resume
+                const structuredData = await getStructuredDataFromGemini(
+                  resumeText
+                );
+
+                if (structuredData) {
+                  // Calculate total experience if work experience is available
+                  if (structuredData["Work Experience"]) {
+                    structuredData["Total Experience Years"] =
+                      calculateTotalExperience(
+                        structuredData["Work Experience"]
+                      );
+                  }
+
+                  // Format job requirements to match expected structure
+                  const jobRequirements = {
+                    role: form.hrRequirements.role,
+                    experience_required:
+                      form.hrRequirements.experience_required,
+                    notice_period: form.hrRequirements.notice_period,
+                    required_skills: form.hrRequirements.required_skills,
+                    preferred_skills: form.hrRequirements.preferred_skills,
+                    qualifications: form.hrRequirements.qualifications,
+                    job_description: form.hrRequirements.job_description,
+                  };
+
+                  // Score the resume
+                  aiEvaluation = await scoreResumeWithGemini(
+                    structuredData,
+                    jobRequirements
+                  );
+                  console.log(
+                    "AI evaluation completed with score:",
+                    aiEvaluation ? aiEvaluation.final_score : "N/A"
+                  );
+                } else {
+                  console.log("Failed to extract structured data from resume");
+                }
+              } else {
+                console.log("Failed to extract text from PDF");
+              }
+            } catch (aiError) {
+              console.error("Error processing resume with AI:", aiError);
+              // Continue without AI evaluation if error occurs
+            }
+          } else {
+            console.log(
+              "No HR requirements found for this form - skipping AI evaluation"
+            );
+          }
 
           // Generate a unique S3 key
           const s3Key = `resumes/${Date.now()}-${req.file.originalname.replace(
@@ -733,11 +1007,12 @@ app.post(
         }
       }
 
-      // Create and save the submission
+      // Create and save the submission with AI evaluation results
       const submission = new Submission({
         formId,
         responses,
         resumeUrl,
+        aiEvaluation,
       });
 
       const savedSubmission = await submission.save();
@@ -748,6 +1023,7 @@ app.post(
         message: "Form submitted successfully",
         submissionId: savedSubmission._id,
         resumeUrl: resumeUrl || null,
+        aiScore: aiEvaluation ? aiEvaluation.final_score : null,
       });
     } catch (error) {
       console.error("Form Submission Error:", error.message);
@@ -764,6 +1040,7 @@ app.post(
 app.get("/api/submissions/:formId", auth, async (req, res) => {
   try {
     const formId = req.params.formId;
+    const { sortBy } = req.query; // Optional query parameter for sorting
 
     // Verify the form belongs to the user
     const form = await Form.findOne({ _id: formId, userId: req.user.id });
@@ -773,8 +1050,100 @@ app.get("/api/submissions/:formId", auth, async (req, res) => {
         .json({ message: "Not authorized to access this form" });
     }
 
-    const submissions = await Submission.find({ formId });
-    res.json({ submissions });
+    // Fetch submissions
+    let submissions = await Submission.find({ formId });
+
+    // Sort submissions based on the sortBy parameter
+    if (sortBy) {
+      switch (sortBy) {
+        case "final_score":
+          submissions.sort((a, b) => {
+            const scoreA = a.aiEvaluation?.final_score || 0;
+            const scoreB = b.aiEvaluation?.final_score || 0;
+            return scoreB - scoreA; // Descending order
+          });
+          break;
+        case "skills_score":
+          submissions.sort((a, b) => {
+            const scoreA = a.aiEvaluation?.breakdown?.skills_score || 0;
+            const scoreB = b.aiEvaluation?.breakdown?.skills_score || 0;
+            return scoreB - scoreA;
+          });
+          break;
+        case "experience_score":
+          submissions.sort((a, b) => {
+            const scoreA = a.aiEvaluation?.breakdown?.experience_score || 0;
+            const scoreB = b.aiEvaluation?.breakdown?.experience_score || 0;
+            return scoreB - scoreA;
+          });
+          break;
+        case "education_score":
+          submissions.sort((a, b) => {
+            const scoreA = a.aiEvaluation?.breakdown?.education_score || 0;
+            const scoreB = b.aiEvaluation?.breakdown?.education_score || 0;
+            return scoreB - scoreA;
+          });
+          break;
+        case "notice_period_score":
+          submissions.sort((a, b) => {
+            const scoreA = a.aiEvaluation?.breakdown?.notice_period_score || 0;
+            const scoreB = b.aiEvaluation?.breakdown?.notice_period_score || 0;
+            return scoreB - scoreA;
+          });
+          break;
+        case "overall_profile_score":
+          submissions.sort((a, b) => {
+            const scoreA =
+              a.aiEvaluation?.breakdown?.overall_profile_score || 0;
+            const scoreB =
+              b.aiEvaluation?.breakdown?.overall_profile_score || 0;
+            return scoreB - scoreA;
+          });
+          break;
+        case "date":
+          submissions.sort(
+            (a, b) => new Date(b.submittedAt) - new Date(a.submittedAt)
+          );
+          break;
+        default:
+          // Default sort by final score if available, otherwise by date
+          submissions.sort((a, b) => {
+            if (a.aiEvaluation?.final_score && b.aiEvaluation?.final_score) {
+              return b.aiEvaluation.final_score - a.aiEvaluation.final_score;
+            } else {
+              return new Date(b.submittedAt) - new Date(a.submittedAt);
+            }
+          });
+      }
+    } else {
+      // Default sort by AI score if available
+      submissions.sort((a, b) => {
+        if (a.aiEvaluation?.final_score && b.aiEvaluation?.final_score) {
+          return b.aiEvaluation.final_score - a.aiEvaluation.final_score;
+        } else {
+          return new Date(b.submittedAt) - new Date(a.submittedAt);
+        }
+      });
+    }
+
+    // Format the response to include the HR requirements
+    const response = {
+      form: {
+        title: form.title,
+        description: form.description,
+        hrRequirements: form.hrRequirements || {},
+      },
+      submissions: submissions.map((submission) => ({
+        _id: submission._id,
+        formId: submission.formId,
+        responses: submission.responses,
+        resumeUrl: submission.resumeUrl,
+        aiEvaluation: submission.aiEvaluation || null,
+        submittedAt: submission.submittedAt,
+      })),
+    };
+
+    res.json(response);
   } catch (error) {
     console.error("Get Submissions Error:", error);
     res.status(500).json({ message: "Server error" });

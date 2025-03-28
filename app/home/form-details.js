@@ -24,11 +24,14 @@ export default function FormDetails() {
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingSubmissions, setLoadingSubmissions] = useState(true);
+  const [sortBy, setSortBy] = useState("final_score"); // Default sort by final score
+  const [hrRequirements, setHrRequirements] = useState(null);
+  const [expandedSubmission, setExpandedSubmission] = useState(null);
 
   useEffect(() => {
     fetchFormDetails();
     fetchSubmissions();
-  }, []);
+  }, [sortBy]); // Refetch when sort changes
 
   const fetchFormDetails = async () => {
     try {
@@ -64,17 +67,23 @@ export default function FormDetails() {
   const fetchSubmissions = async () => {
     try {
       setLoadingSubmissions(true);
-      const response = await fetch(`${API_URL}/api/submissions/${id}`, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          "x-auth-token": userToken,
-        },
-      });
+      const response = await fetch(
+        `${API_URL}/api/submissions/${id}?sortBy=${sortBy}`,
+        {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            "x-auth-token": userToken,
+          },
+        }
+      );
 
       const data = await response.json();
       if (response.ok) {
         setSubmissions(data.submissions || []);
+        if (data.form && data.form.hrRequirements) {
+          setHrRequirements(data.form.hrRequirements);
+        }
       } else {
         console.error("Failed to fetch submissions:", data.message);
       }
@@ -126,36 +135,166 @@ export default function FormDetails() {
 
   // Render a candidate submission item
   const renderSubmissionItem = ({ item, index }) => {
+    const hasAiScore = item.aiEvaluation && item.aiEvaluation.final_score;
+
+    // Find the candidate's name from responses
+    const nameResponse = item.responses.find((resp) =>
+      getFieldLabel(resp.fieldId).toLowerCase().includes("name")
+    );
+    const candidateName = nameResponse
+      ? nameResponse.value
+      : `Candidate ${index + 1}`;
+
+    // Find the candidate's email from responses
+    const emailResponse = item.responses.find((resp) =>
+      getFieldLabel(resp.fieldId).toLowerCase().includes("email")
+    );
+    const candidateEmail = emailResponse ? emailResponse.value : "";
+
+    // Find the candidate's phone from responses
+    const phoneResponse = item.responses.find((resp) =>
+      getFieldLabel(resp.fieldId).toLowerCase().includes("phone")
+    );
+    const candidatePhone = phoneResponse ? phoneResponse.value : "";
+
     return (
       <View style={styles.submissionCard}>
-        <View style={styles.submissionHeader}>
-          <Text style={styles.submissionTitle}>Submission #{index + 1}</Text>
-          <Text style={styles.submissionDate}>
-            {new Date(item.submittedAt).toLocaleDateString()}
-          </Text>
-        </View>
+        {hasAiScore && (
+          <View style={styles.scoreSection}>
+            <Text style={styles.finalScoreText}>
+              Score: {item.aiEvaluation.final_score}/100
+            </Text>
 
-        <View style={styles.responsesList}>
-          {item.responses.map((response, idx) => (
-            <View key={idx} style={styles.responseItem}>
-              <Text style={styles.responseLabel}>
-                {getFieldLabel(response.fieldId)}:
-              </Text>
-              <Text style={styles.responseValue}>{response.value}</Text>
+            <View style={styles.scoreBreakdown}>
+              <View style={styles.scoreItem}>
+                <Text style={styles.scoreLabel}>Skills</Text>
+                <Text style={styles.scoreValue}>
+                  {item.aiEvaluation.breakdown.skills_score}
+                </Text>
+              </View>
+              <View style={styles.scoreItem}>
+                <Text style={styles.scoreLabel}>Exp</Text>
+                <Text style={styles.scoreValue}>
+                  {item.aiEvaluation.breakdown.experience_score}
+                </Text>
+              </View>
+              <View style={styles.scoreItem}>
+                <Text style={styles.scoreLabel}>Edu</Text>
+                <Text style={styles.scoreValue}>
+                  {item.aiEvaluation.breakdown.education_score}
+                </Text>
+              </View>
+              <View style={styles.scoreItem}>
+                <Text style={styles.scoreLabel}>Notice</Text>
+                <Text style={styles.scoreValue}>
+                  {item.aiEvaluation.breakdown.notice_period_score}
+                </Text>
+              </View>
             </View>
-          ))}
+          </View>
+        )}
+
+        <View style={styles.candidateInfo}>
+          <View style={styles.candidateDetails}>
+            <Text style={styles.candidateName}>{candidateName}</Text>
+            {candidateEmail && (
+              <Text style={styles.candidateContact}>{candidateEmail}</Text>
+            )}
+            {candidatePhone && (
+              <Text style={styles.candidateContact}>{candidatePhone}</Text>
+            )}
+            <Text style={styles.submissionDate}>
+              Applied: {new Date(item.submittedAt).toLocaleDateString()}
+            </Text>
+          </View>
+
+          <View style={styles.actionButtons}>
+            {item.resumeUrl ? (
+              <TouchableOpacity
+                style={styles.resumeButton}
+                onPress={() => openResumeLink(item.resumeUrl)}
+              >
+                <Ionicons name="document-text" size={20} color="#fff" />
+                <Text style={styles.resumeButtonText}>Resume</Text>
+              </TouchableOpacity>
+            ) : (
+              <Text style={styles.noResumeText}>No resume</Text>
+            )}
+
+            <TouchableOpacity
+              style={styles.detailsButton}
+              onPress={() =>
+                setExpandedSubmission(
+                  expandedSubmission === item._id ? null : item._id
+                )
+              }
+            >
+              <Ionicons
+                name={
+                  expandedSubmission === item._id
+                    ? "chevron-up"
+                    : "chevron-down"
+                }
+                size={20}
+                color="#4a6da7"
+              />
+            </TouchableOpacity>
+          </View>
         </View>
 
-        {item.resumeUrl ? (
-          <TouchableOpacity
-            style={styles.resumeButton}
-            onPress={() => openResumeLink(item.resumeUrl)}
-          >
-            <Ionicons name="document-text" size={20} color="#fff" />
-            <Text style={styles.resumeButtonText}>View Resume</Text>
-          </TouchableOpacity>
-        ) : (
-          <Text style={styles.noResumeText}>No resume attached</Text>
+        {expandedSubmission === item._id && (
+          <View style={styles.expandedDetails}>
+            <Text style={styles.expandedTitle}>Detailed Responses</Text>
+            <View style={styles.responsesList}>
+              {item.responses.map((response, idx) => (
+                <View key={idx} style={styles.responseItem}>
+                  <Text style={styles.responseLabel}>
+                    {getFieldLabel(response.fieldId)}:
+                  </Text>
+                  <Text style={styles.responseValue}>{response.value}</Text>
+                </View>
+              ))}
+            </View>
+
+            {hasAiScore && (
+              <View style={styles.aiAnalysis}>
+                <Text style={styles.aiAnalysisTitle}>AI Analysis</Text>
+                <View style={styles.analysisItem}>
+                  <Text style={styles.analysisLabel}>Skills:</Text>
+                  <Text style={styles.analysisText}>
+                    {item.aiEvaluation.detailed_reasoning.skills_analysis}
+                  </Text>
+                </View>
+                <View style={styles.analysisItem}>
+                  <Text style={styles.analysisLabel}>Experience:</Text>
+                  <Text style={styles.analysisText}>
+                    {item.aiEvaluation.detailed_reasoning.experience_analysis}
+                  </Text>
+                </View>
+                <View style={styles.analysisItem}>
+                  <Text style={styles.analysisLabel}>Education:</Text>
+                  <Text style={styles.analysisText}>
+                    {item.aiEvaluation.detailed_reasoning.education_analysis}
+                  </Text>
+                </View>
+                <View style={styles.analysisItem}>
+                  <Text style={styles.analysisLabel}>Notice Period:</Text>
+                  <Text style={styles.analysisText}>
+                    {
+                      item.aiEvaluation.detailed_reasoning
+                        .notice_period_analysis
+                    }
+                  </Text>
+                </View>
+                <View style={styles.analysisItem}>
+                  <Text style={styles.analysisLabel}>Overall:</Text>
+                  <Text style={styles.analysisText}>
+                    {item.aiEvaluation.detailed_reasoning.overall_analysis}
+                  </Text>
+                </View>
+              </View>
+            )}
+          </View>
         )}
       </View>
     );
@@ -218,7 +357,96 @@ export default function FormDetails() {
       </View>
 
       <View style={styles.submissionsContainer}>
-        <Text style={styles.sectionTitle}>Candidate Submissions</Text>
+        <View style={styles.submissionsHeader}>
+          <Text style={styles.sectionTitle}>Candidate Submissions</Text>
+
+          {hrRequirements && (
+            <View style={styles.sortingControls}>
+              <Text style={styles.sortLabel}>Sort by:</Text>
+              <TouchableOpacity
+                style={[
+                  styles.sortButton,
+                  sortBy === "final_score" && styles.activeSortButton,
+                ]}
+                onPress={() => setSortBy("final_score")}
+              >
+                <Text
+                  style={[
+                    styles.sortButtonText,
+                    sortBy === "final_score" && styles.activeSortButtonText,
+                  ]}
+                >
+                  Overall
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.sortButton,
+                  sortBy === "skills_score" && styles.activeSortButton,
+                ]}
+                onPress={() => setSortBy("skills_score")}
+              >
+                <Text
+                  style={[
+                    styles.sortButtonText,
+                    sortBy === "skills_score" && styles.activeSortButtonText,
+                  ]}
+                >
+                  Skills
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.sortButton,
+                  sortBy === "experience_score" && styles.activeSortButton,
+                ]}
+                onPress={() => setSortBy("experience_score")}
+              >
+                <Text
+                  style={[
+                    styles.sortButtonText,
+                    sortBy === "experience_score" &&
+                      styles.activeSortButtonText,
+                  ]}
+                >
+                  Experience
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.sortButton,
+                  sortBy === "education_score" && styles.activeSortButton,
+                ]}
+                onPress={() => setSortBy("education_score")}
+              >
+                <Text
+                  style={[
+                    styles.sortButtonText,
+                    sortBy === "education_score" && styles.activeSortButtonText,
+                  ]}
+                >
+                  Education
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.sortButton,
+                  sortBy === "date" && styles.activeSortButton,
+                ]}
+                onPress={() => setSortBy("date")}
+              >
+                <Text
+                  style={[
+                    styles.sortButtonText,
+                    sortBy === "date" && styles.activeSortButtonText,
+                  ]}
+                >
+                  Date
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
 
         {loadingSubmissions ? (
           <ActivityIndicator
@@ -462,5 +690,120 @@ const styles = StyleSheet.create({
     fontStyle: "italic",
     textAlign: "center",
     marginTop: 8,
+  },
+  scoreSection: {
+    marginBottom: 16,
+  },
+  finalScoreText: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#4a6da7",
+    marginBottom: 8,
+  },
+  scoreBreakdown: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+  },
+  scoreItem: {
+    alignItems: "center",
+  },
+  scoreLabel: {
+    fontSize: 14,
+    color: "#777",
+    marginBottom: 4,
+  },
+  scoreValue: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#4a6da7",
+  },
+  candidateInfo: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  candidateDetails: {
+    flex: 1,
+  },
+  candidateName: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#333",
+  },
+  candidateContact: {
+    fontSize: 14,
+    color: "#777",
+  },
+  actionButtons: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  detailsButton: {
+    padding: 4,
+  },
+  expandedDetails: {
+    marginTop: 16,
+  },
+  expandedTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#333",
+    marginBottom: 16,
+  },
+  aiAnalysis: {
+    marginTop: 16,
+  },
+  aiAnalysisTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#333",
+    marginBottom: 8,
+  },
+  analysisItem: {
+    marginBottom: 8,
+  },
+  analysisLabel: {
+    fontSize: 14,
+    fontWeight: "bold",
+    color: "#777",
+    marginBottom: 4,
+  },
+  analysisText: {
+    fontSize: 16,
+    color: "#333",
+  },
+  submissionsHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  sortingControls: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  sortLabel: {
+    fontSize: 14,
+    fontWeight: "bold",
+    color: "#777",
+    marginRight: 8,
+  },
+  sortButton: {
+    padding: 8,
+    borderWidth: 1,
+    borderColor: "#e1e1e1",
+    borderRadius: 6,
+  },
+  activeSortButton: {
+    borderColor: "#4a6da7",
+  },
+  sortButtonText: {
+    fontSize: 14,
+    fontWeight: "bold",
+    color: "#4a6da7",
+  },
+  activeSortButtonText: {
+    color: "#ffffff",
+    backgroundColor: "#4a6da7",
   },
 });

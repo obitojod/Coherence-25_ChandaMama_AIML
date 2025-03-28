@@ -53,6 +53,29 @@ export default function CreateForm() {
         options: [],
       },
     ],
+    hrRequirements: {
+      job_id: "",
+      role: "",
+      experience_required: {
+        minimum: 0,
+        maximum: 0,
+        preferred_industry: "",
+      },
+      notice_period: {
+        required: "",
+        preferred: "",
+      },
+      location: {
+        city: "",
+        state: "",
+        country: "",
+        remote_option: "",
+      },
+      required_skills: [],
+      preferred_skills: [],
+      qualifications: [],
+      job_description: "",
+    },
   });
 
   const addField = () => {
@@ -120,6 +143,74 @@ export default function CreateForm() {
         }
         return field;
       }),
+    });
+  };
+
+  const updateHrRequirements = (path, value) => {
+    const pathArray = path.split(".");
+    const newHrRequirements = { ...formData.hrRequirements };
+
+    let current = newHrRequirements;
+    for (let i = 0; i < pathArray.length - 1; i++) {
+      current = current[pathArray[i]];
+    }
+
+    current[pathArray[pathArray.length - 1]] = value;
+
+    setFormData({
+      ...formData,
+      hrRequirements: newHrRequirements,
+    });
+  };
+
+  const addHrRequirementItem = (arrayPath, value = "") => {
+    const pathArray = arrayPath.split(".");
+    const newHrRequirements = { ...formData.hrRequirements };
+
+    let current = newHrRequirements;
+    for (let i = 0; i < pathArray.length; i++) {
+      current = current[pathArray[i]];
+    }
+
+    current.push(value);
+
+    setFormData({
+      ...formData,
+      hrRequirements: newHrRequirements,
+    });
+  };
+
+  const removeHrRequirementItem = (arrayPath, index) => {
+    const pathArray = arrayPath.split(".");
+    const newHrRequirements = { ...formData.hrRequirements };
+
+    let current = newHrRequirements;
+    for (let i = 0; i < pathArray.length; i++) {
+      current = current[pathArray[i]];
+    }
+
+    current.splice(index, 1);
+
+    setFormData({
+      ...formData,
+      hrRequirements: newHrRequirements,
+    });
+  };
+
+  const updateHrRequirementItem = (arrayPath, index, value) => {
+    const pathArray = arrayPath.split(".");
+    const newHrRequirements = { ...formData.hrRequirements };
+
+    let current = newHrRequirements;
+    for (let i = 0; i < pathArray.length; i++) {
+      current = current[pathArray[i]];
+    }
+
+    current[index] = value;
+
+    setFormData({
+      ...formData,
+      hrRequirements: newHrRequirements,
     });
   };
 
@@ -260,6 +351,287 @@ export default function CreateForm() {
               multiline
               numberOfLines={4}
             />
+          </View>
+        </View>
+
+        <View style={styles.formSection}>
+          <Text style={styles.sectionTitle}>Job Requirements (AI Scoring)</Text>
+          <Text style={styles.sectionDescription}>
+            Fill out these fields to enable AI resume scoring and ranking
+          </Text>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Job ID</Text>
+            <TextInput
+              style={styles.textInput}
+              value={formData.hrRequirements.job_id}
+              onChangeText={(text) => updateHrRequirements("job_id", text)}
+              placeholder="Enter job ID"
+            />
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Role</Text>
+            <TextInput
+              style={styles.textInput}
+              value={formData.hrRequirements.role}
+              onChangeText={(text) => updateHrRequirements("role", text)}
+              placeholder="Enter job role"
+            />
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Job Description</Text>
+            <TextInput
+              style={[styles.textInput, styles.textArea]}
+              value={formData.hrRequirements.job_description}
+              onChangeText={(text) =>
+                updateHrRequirements("job_description", text)
+              }
+              placeholder="Enter detailed job description"
+              multiline
+              numberOfLines={4}
+            />
+          </View>
+
+          <View style={styles.subSection}>
+            <Text style={styles.subSectionTitle}>Experience Requirements</Text>
+
+            <View style={styles.rowContainer}>
+              <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
+                <Text style={styles.inputLabel}>Minimum (years)</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={formData.hrRequirements.experience_required.minimum.toString()}
+                  onChangeText={(text) =>
+                    updateHrRequirements(
+                      "experience_required.minimum",
+                      Number(text) || 0
+                    )
+                  }
+                  placeholder="0"
+                  keyboardType="numeric"
+                />
+              </View>
+
+              <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
+                <Text style={styles.inputLabel}>Maximum (years)</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={formData.hrRequirements.experience_required.maximum.toString()}
+                  onChangeText={(text) =>
+                    updateHrRequirements(
+                      "experience_required.maximum",
+                      Number(text) || 0
+                    )
+                  }
+                  placeholder="0"
+                  keyboardType="numeric"
+                />
+              </View>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Preferred Industry</Text>
+              <TextInput
+                style={styles.textInput}
+                value={
+                  formData.hrRequirements.experience_required.preferred_industry
+                }
+                onChangeText={(text) =>
+                  updateHrRequirements(
+                    "experience_required.preferred_industry",
+                    text
+                  )
+                }
+                placeholder="Enter preferred industry"
+              />
+            </View>
+          </View>
+
+          <View style={styles.subSection}>
+            <Text style={styles.subSectionTitle}>Notice Period</Text>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Required Notice Period</Text>
+              <TextInput
+                style={styles.textInput}
+                value={formData.hrRequirements.notice_period.required}
+                onChangeText={(text) =>
+                  updateHrRequirements("notice_period.required", text)
+                }
+                placeholder="e.g., Immediate to 30 days"
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Preferred Notice Period</Text>
+              <TextInput
+                style={styles.textInput}
+                value={formData.hrRequirements.notice_period.preferred}
+                onChangeText={(text) =>
+                  updateHrRequirements("notice_period.preferred", text)
+                }
+                placeholder="e.g., 15 days"
+              />
+            </View>
+          </View>
+
+          <View style={styles.subSection}>
+            <Text style={styles.subSectionTitle}>Location</Text>
+
+            <View style={styles.rowContainer}>
+              <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
+                <Text style={styles.inputLabel}>City</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={formData.hrRequirements.location.city}
+                  onChangeText={(text) =>
+                    updateHrRequirements("location.city", text)
+                  }
+                  placeholder="City"
+                />
+              </View>
+
+              <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
+                <Text style={styles.inputLabel}>State</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={formData.hrRequirements.location.state}
+                  onChangeText={(text) =>
+                    updateHrRequirements("location.state", text)
+                  }
+                  placeholder="State"
+                />
+              </View>
+            </View>
+
+            <View style={styles.rowContainer}>
+              <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
+                <Text style={styles.inputLabel}>Country</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={formData.hrRequirements.location.country}
+                  onChangeText={(text) =>
+                    updateHrRequirements("location.country", text)
+                  }
+                  placeholder="Country"
+                />
+              </View>
+
+              <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
+                <Text style={styles.inputLabel}>Remote Option</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={formData.hrRequirements.location.remote_option}
+                  onChangeText={(text) =>
+                    updateHrRequirements("location.remote_option", text)
+                  }
+                  placeholder="e.g., Hybrid, Remote, Onsite"
+                />
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.subSection}>
+            <Text style={styles.subSectionTitle}>Required Skills</Text>
+
+            {formData.hrRequirements.required_skills.map((skill, index) => (
+              <View key={index} style={styles.itemRow}>
+                <TextInput
+                  style={[styles.textInput, { flex: 1 }]}
+                  value={skill}
+                  onChangeText={(text) =>
+                    updateHrRequirementItem("required_skills", index, text)
+                  }
+                  placeholder="Enter skill"
+                />
+                <TouchableOpacity
+                  style={styles.removeItemButton}
+                  onPress={() =>
+                    removeHrRequirementItem("required_skills", index)
+                  }
+                >
+                  <Ionicons name="close-circle" size={24} color="#ff6b6b" />
+                </TouchableOpacity>
+              </View>
+            ))}
+
+            <TouchableOpacity
+              style={styles.addItemButton}
+              onPress={() => addHrRequirementItem("required_skills")}
+            >
+              <Ionicons name="add-circle" size={20} color="#4a6da7" />
+              <Text style={styles.addItemText}>Add Required Skill</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.subSection}>
+            <Text style={styles.subSectionTitle}>Preferred Skills</Text>
+
+            {formData.hrRequirements.preferred_skills.map((skill, index) => (
+              <View key={index} style={styles.itemRow}>
+                <TextInput
+                  style={[styles.textInput, { flex: 1 }]}
+                  value={skill}
+                  onChangeText={(text) =>
+                    updateHrRequirementItem("preferred_skills", index, text)
+                  }
+                  placeholder="Enter skill"
+                />
+                <TouchableOpacity
+                  style={styles.removeItemButton}
+                  onPress={() =>
+                    removeHrRequirementItem("preferred_skills", index)
+                  }
+                >
+                  <Ionicons name="close-circle" size={24} color="#ff6b6b" />
+                </TouchableOpacity>
+              </View>
+            ))}
+
+            <TouchableOpacity
+              style={styles.addItemButton}
+              onPress={() => addHrRequirementItem("preferred_skills")}
+            >
+              <Ionicons name="add-circle" size={20} color="#4a6da7" />
+              <Text style={styles.addItemText}>Add Preferred Skill</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.subSection}>
+            <Text style={styles.subSectionTitle}>Qualifications</Text>
+
+            {formData.hrRequirements.qualifications.map(
+              (qualification, index) => (
+                <View key={index} style={styles.itemRow}>
+                  <TextInput
+                    style={[styles.textInput, { flex: 1 }]}
+                    value={qualification}
+                    onChangeText={(text) =>
+                      updateHrRequirementItem("qualifications", index, text)
+                    }
+                    placeholder="Enter qualification"
+                  />
+                  <TouchableOpacity
+                    style={styles.removeItemButton}
+                    onPress={() =>
+                      removeHrRequirementItem("qualifications", index)
+                    }
+                  >
+                    <Ionicons name="close-circle" size={24} color="#ff6b6b" />
+                  </TouchableOpacity>
+                </View>
+              )
+            )}
+
+            <TouchableOpacity
+              style={styles.addItemButton}
+              onPress={() => addHrRequirementItem("qualifications")}
+            >
+              <Ionicons name="add-circle" size={20} color="#4a6da7" />
+              <Text style={styles.addItemText}>Add Qualification</Text>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -411,7 +783,7 @@ const styles = StyleSheet.create({
     color: "#333",
     marginBottom: 8,
   },
-  sectionSubtitle: {
+  sectionDescription: {
     fontSize: 14,
     color: "#666",
     marginBottom: 16,
@@ -575,5 +947,44 @@ const styles = StyleSheet.create({
     color: "#ffffff",
     fontSize: 16,
     fontWeight: "bold",
+  },
+  subSection: {
+    marginTop: 20,
+    marginBottom: 20,
+    borderTopWidth: 1,
+    borderTopColor: "#eee",
+    paddingTop: 16,
+  },
+  subSectionTitle: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#4a6da7",
+    marginBottom: 12,
+  },
+  rowContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  itemRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  addItemButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 8,
+    backgroundColor: "#f0f4fa",
+    borderRadius: 8,
+    alignSelf: "flex-start",
+    marginTop: 8,
+  },
+  addItemText: {
+    fontSize: 14,
+    color: "#4a6da7",
+    marginLeft: 8,
+  },
+  removeItemButton: {
+    marginLeft: 12,
   },
 });
