@@ -16,6 +16,59 @@ const s3 = new aws.S3({
   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
   secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
   region: process.env.AWS_REGION,
+  // Add these settings to help debug S3 issues
+  maxRetries: 3,
+  httpOptions: { timeout: 30000 },
+});
+
+// Debug AWS configuration
+console.log("S3 Config:", {
+  bucket: process.env.AWS_BUCKET_NAME,
+  region: process.env.AWS_REGION,
+  keyId: process.env.AWS_ACCESS_KEY_ID
+    ? "***" + process.env.AWS_ACCESS_KEY_ID.slice(-4)
+    : "missing",
+  secretKey: process.env.AWS_SECRET_ACCESS_KEY
+    ? "***" + process.env.AWS_SECRET_ACCESS_KEY.slice(-4)
+    : "missing",
+});
+
+// Test S3 bucket access instead of listing all buckets (which requires different permissions)
+s3.headBucket({ Bucket: process.env.AWS_BUCKET_NAME }, (err, data) => {
+  if (err) {
+    console.error(
+      `Error accessing S3 bucket "${process.env.AWS_BUCKET_NAME}":`,
+      err
+    );
+    console.log(
+      "Make sure your IAM user has s3:HeadBucket permission on this specific bucket"
+    );
+  } else {
+    console.log(
+      `Successfully connected to S3 bucket: ${process.env.AWS_BUCKET_NAME}`
+    );
+
+    // Test by putting a small test object
+    s3.putObject(
+      {
+        Bucket: process.env.AWS_BUCKET_NAME,
+        Key: "test-connection.txt",
+        Body: "This is a test file to verify S3 connection and permissions.",
+        ContentType: "text/plain",
+      },
+      (putErr, putData) => {
+        if (putErr) {
+          console.error("Error uploading test file to S3:", putErr);
+          console.log("Make sure your IAM user has s3:PutObject permission");
+        } else {
+          console.log(
+            "Successfully uploaded test file to S3, write permissions confirmed"
+          );
+          console.log("S3 URL capabilities confirmed");
+        }
+      }
+    );
+  }
 });
 
 const app = express();
@@ -446,123 +499,266 @@ const upload = multer({
   storage: storage,
   fileFilter: (req, file, cb) => {
     console.log(`Received file: ${file.originalname}, type: ${file.mimetype}`);
+    console.log("File info:", file);
     // Accept all file types
     cb(null, true);
   },
+  // Add limits to better handle file uploads
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
 });
+
+// Debug middleware to inspect incoming requests with files
+const logRequestMiddleware = (req, res, next) => {
+  console.log("================ FILE UPLOAD REQUEST ================");
+  console.log(`Received ${req.method} request to ${req.originalUrl}`);
+  console.log("Headers:", req.headers);
+  console.log("Content-Type:", req.headers["content-type"]);
+
+  if (
+    req.headers["content-type"] &&
+    req.headers["content-type"].includes("multipart/form-data")
+  ) {
+    console.log("Multipart form detected");
+    // Log more details about the request
+    console.log("Body keys:", Object.keys(req.body));
+    console.log("Request method:", req.method);
+    // For testing, dump raw request chunks - just for debugging
+    let rawData = "";
+    req.on("data", (chunk) => {
+      // Only collect a limited amount to avoid memory issues
+      if (rawData.length < 1000) {
+        rawData += chunk;
+      }
+    });
+    req.on("end", () => {
+      console.log("Raw request data sample:", rawData.substring(0, 200));
+    });
+  } else {
+    console.log("Warning: Not a multipart form request");
+  }
+
+  next();
+};
 
 // Submit form response with file upload
-app.post("/api/submit/:formId", upload.single("resume"), async (req, res) => {
-  try {
-    const formId = req.params.formId;
-    console.log(`Form submission received for form ID: ${formId}`);
-
-    // Log file information if a file was uploaded
-    if (req.file) {
-      console.log("FILE RECEIVED ✓");
-      console.log(`Filename: ${req.file.originalname}`);
-      console.log(`Temp path: ${req.file.path}`);
-      console.log(`Size: ${req.file.size} bytes`);
-      console.log(`Mimetype: ${req.file.mimetype}`);
-    } else {
-      console.log("No file received in the request");
-    }
-
-    // Check if responses were provided
-    if (!req.body.responses) {
-      console.error("Missing 'responses' field in request body");
-      return res.status(400).json({ message: "Missing form responses" });
-    }
-
-    // Parse responses
-    let responses;
+app.post(
+  "/api/submit/:formId",
+  logRequestMiddleware,
+  upload.single("resume"),
+  async (req, res) => {
     try {
-      responses = JSON.parse(req.body.responses);
-      console.log(`Parsed ${responses.length} responses`);
-    } catch (parseError) {
-      console.error("Failed to parse responses:", parseError.message);
-      return res.status(400).json({ message: "Invalid response format" });
-    }
+      const formId = req.params.formId;
+      console.log(`Form submission received for form ID: ${formId}`);
 
-    let resumeUrl = "";
-
-    // If a file was uploaded, upload it to S3
-    if (req.file) {
-      try {
-        // Double check the file exists at the path
-        if (!fs.existsSync(req.file.path)) {
-          console.error(`File doesn't exist at path: ${req.file.path}`);
-          return res.status(500).json({ message: "File processing error" });
-        }
-
-        const fileContent = fs.readFileSync(req.file.path);
-        console.log(`Read ${fileContent.length} bytes from temp file`);
-
-        // Generate a unique S3 key
-        const s3Key = `resumes/${Date.now()}-${req.file.originalname.replace(
-          /[^a-zA-Z0-9.-]/g,
-          "_"
-        )}`;
-
-        // Set up S3 upload parameters
-        const params = {
-          Bucket: process.env.AWS_BUCKET_NAME,
-          Key: s3Key,
-          Body: fileContent,
-          ContentType: req.file.mimetype,
-          ACL: "public-read",
-        };
-
-        console.log(
-          `Uploading to S3: ${s3Key} (${process.env.AWS_BUCKET_NAME})`
-        );
-        const s3Response = await s3.upload(params).promise();
-        resumeUrl = s3Response.Location;
-        console.log(`S3 upload successful! File URL: ${resumeUrl}`);
-
-        // Clean up the temporary file
-        try {
-          fs.unlinkSync(req.file.path);
-          console.log(`Removed temporary file: ${req.file.path}`);
-        } catch (unlinkError) {
-          console.error(`Failed to delete temp file: ${unlinkError.message}`);
-        }
-      } catch (s3Error) {
-        console.error("S3 Upload Error:", s3Error.message);
-        console.error(s3Error.stack);
-
-        // Continue with the submission even if S3 upload fails
-        resumeUrl = "Error uploading file";
+      // Log file information if a file was uploaded
+      if (req.file) {
+        console.log("FILE RECEIVED ✓");
+        console.log(`Filename: ${req.file.originalname}`);
+        console.log(`Temp path: ${req.file.path}`);
+        console.log(`Size: ${req.file.size} bytes`);
+        console.log(`Mimetype: ${req.file.mimetype}`);
+      } else {
+        console.log("No file received in the request");
       }
-    } else {
-      console.log("No resume file was uploaded with the form submission");
+
+      // Check if responses were provided
+      if (!req.body.responses) {
+        console.error("Missing 'responses' field in request body");
+        return res.status(400).json({ message: "Missing form responses" });
+      }
+
+      // Parse responses
+      let responses;
+      try {
+        responses = JSON.parse(req.body.responses);
+        console.log(`Parsed ${responses.length} responses`);
+      } catch (parseError) {
+        console.error("Failed to parse responses:", parseError.message);
+        return res.status(400).json({ message: "Invalid response format" });
+      }
+
+      // Initialize resumeUrl variable
+      let resumeUrl = null;
+
+      // If a file was uploaded, upload it to S3
+      if (req.file) {
+        try {
+          // Double check the file exists at the path
+          if (!fs.existsSync(req.file.path)) {
+            console.error(`File doesn't exist at path: ${req.file.path}`);
+            return res.status(500).json({ message: "File processing error" });
+          }
+
+          const fileContent = fs.readFileSync(req.file.path);
+          console.log(`Read ${fileContent.length} bytes from temp file`);
+
+          // Generate a unique S3 key
+          const s3Key = `resumes/${Date.now()}-${req.file.originalname.replace(
+            /[^a-zA-Z0-9.-]/g,
+            "_"
+          )}`;
+
+          // Set up S3 upload parameters - remove ACL if it causes permissions issues
+          const params = {
+            Bucket: process.env.AWS_BUCKET_NAME,
+            Key: s3Key,
+            Body: fileContent,
+            ContentType: req.file.mimetype,
+          };
+
+          console.log(
+            `Uploading to S3: ${s3Key} (${process.env.AWS_BUCKET_NAME})`
+          );
+
+          // Try upload with Promise-based approach
+          const s3Response = await s3.upload(params).promise();
+          resumeUrl = s3Response.Location;
+          console.log(`S3 upload successful! File URL: ${resumeUrl}`);
+
+          // If Location is undefined, construct the URL manually
+          if (!resumeUrl) {
+            resumeUrl = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`;
+            console.log(`Generated URL manually: ${resumeUrl}`);
+          }
+
+          // Clean up the temporary file
+          try {
+            fs.unlinkSync(req.file.path);
+            console.log(`Removed temporary file: ${req.file.path}`);
+          } catch (unlinkError) {
+            console.error(`Failed to delete temp file: ${unlinkError.message}`);
+          }
+        } catch (uploadErr) {
+          console.error("S3 Upload Error:", uploadErr.message);
+
+          // Try fallback approach with putObject
+          try {
+            console.log("Trying fallback putObject method...");
+            await s3.putObject(params).promise();
+            resumeUrl = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`;
+            console.log(
+              `Fallback upload successful! Generated URL: ${resumeUrl}`
+            );
+          } catch (fallbackErr) {
+            console.error("Fallback S3 Upload Failed:", fallbackErr.message);
+            throw uploadErr; // Re-throw the original error
+          }
+        }
+      } else {
+        console.log("No resume file was uploaded with the form submission");
+
+        // Check if resume might be in the request body instead
+        if (req.body && req.body.resume) {
+          console.log("Found resume in request body");
+          try {
+            // For testing, log what type of data we received
+            console.log("Resume type in body:", typeof req.body.resume);
+
+            // Create temp file path
+            const tempDir = path.join(__dirname, "tmp");
+            if (!fs.existsSync(tempDir)) {
+              fs.mkdirSync(tempDir, { recursive: true });
+            }
+            const tempFilePath = path.join(tempDir, `temp-${Date.now()}.pdf`);
+
+            // Handle different types of resume data
+            let fileBuffer;
+            if (typeof req.body.resume === "string") {
+              // If it's base64 encoded
+              if (req.body.resume.startsWith("data:")) {
+                // Parse data URL
+                const matches = req.body.resume.match(
+                  /^data:([A-Za-z-+\/]+);base64,(.+)$/
+                );
+                if (matches && matches.length === 3) {
+                  const contentType = matches[1];
+                  const data = matches[2];
+                  fileBuffer = Buffer.from(data, "base64");
+                  console.log(
+                    `Parsed base64 data, size: ${fileBuffer.length} bytes`
+                  );
+                }
+              } else {
+                // Just plain base64 without data URL prefix
+                fileBuffer = Buffer.from(req.body.resume, "base64");
+              }
+            } else if (Buffer.isBuffer(req.body.resume)) {
+              fileBuffer = req.body.resume;
+            } else if (typeof req.body.resume === "object") {
+              console.log("Resume is an object, can't process directly");
+              return;
+            }
+
+            if (fileBuffer) {
+              fs.writeFileSync(tempFilePath, fileBuffer);
+              console.log(`Saved temporary file: ${tempFilePath}`);
+
+              // Now upload to S3
+              const s3Key = `resumes/${Date.now()}-resume.pdf`;
+
+              const params = {
+                Bucket: process.env.AWS_BUCKET_NAME,
+                Key: s3Key,
+                Body: fileBuffer,
+                ContentType: "application/pdf",
+              };
+
+              const s3Response = await s3.upload(params).promise();
+              resumeUrl =
+                s3Response.Location ||
+                `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`;
+              console.log(`Uploaded from request body to S3: ${resumeUrl}`);
+
+              // Clean up
+              fs.unlinkSync(tempFilePath);
+            }
+          } catch (bodyError) {
+            console.error("Error processing resume from body:", bodyError);
+          }
+        } else {
+          console.log("No resume found in request body either");
+        }
+
+        console.log("Request headers:", req.headers);
+        console.log("Form data content-type:", req.headers["content-type"]);
+        if (
+          req.headers["content-type"] &&
+          req.headers["content-type"].includes("multipart/form-data")
+        ) {
+          console.error(
+            "Request is multipart but no file was captured by multer"
+          );
+        }
+      }
+
+      // Create and save the submission
+      const submission = new Submission({
+        formId,
+        responses,
+        resumeUrl,
+      });
+
+      const savedSubmission = await submission.save();
+      console.log(`Form submission saved with ID: ${savedSubmission._id}`);
+
+      res.status(201).json({
+        success: true,
+        message: "Form submitted successfully",
+        submissionId: savedSubmission._id,
+        resumeUrl: resumeUrl || null,
+      });
+    } catch (error) {
+      console.error("Form Submission Error:", error.message);
+      console.error(error.stack);
+      res.status(500).json({
+        message: "Server error during form submission",
+        error: error.message,
+      });
     }
-
-    // Create and save the submission
-    const submission = new Submission({
-      formId,
-      responses,
-      resumeUrl,
-    });
-
-    const savedSubmission = await submission.save();
-    console.log(`Form submission saved with ID: ${savedSubmission._id}`);
-
-    res.status(201).json({
-      success: true,
-      message: "Form submitted successfully",
-      submissionId: savedSubmission._id,
-      resumeUrl: resumeUrl || null,
-    });
-  } catch (error) {
-    console.error("Form Submission Error:", error.message);
-    console.error(error.stack);
-    res.status(500).json({
-      message: "Server error during form submission",
-      error: error.message,
-    });
   }
-});
+);
 
 // Get form submissions
 app.get("/api/submissions/:formId", auth, async (req, res) => {

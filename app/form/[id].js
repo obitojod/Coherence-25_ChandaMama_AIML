@@ -182,65 +182,98 @@ export default function PublicForm() {
           // Make sure we have all the required file information
           console.log("Attaching file to request:", resumeFile.name);
 
-          // Create the file object with explicit parameters
-          const fileToUpload = {
-            uri: resumeFile.uri,
-            type: resumeFile.mimeType || "application/octet-stream",
-            name: resumeFile.name || "resume.pdf",
-          };
-          console.log("File details:", JSON.stringify(fileToUpload));
+          // For web, when running in Chrome simulator
+          if (Platform.OS === "web") {
+            // In web, we need to get the actual file from the URI
+            // For a fully working web version, you'd need file input element
+            // This is a simplified version for testing
+            console.log(
+              "Web platform detected, handling file upload differently"
+            );
 
-          // Append to FormData with explicit key name
-          formData.append("resume", fileToUpload);
+            const response = await fetch(resumeFile.uri);
+            const blob = await response.blob();
+            formData.append("resume", blob, resumeFile.name);
+          } else {
+            // For React Native (iOS/Android)
+            // Create the file object with explicit parameters
+            const fileToUpload = {
+              uri: resumeFile.uri,
+              type: resumeFile.mimeType || "application/octet-stream",
+              name: resumeFile.name || "resume.pdf",
+            };
+            console.log("File details:", JSON.stringify(fileToUpload));
+
+            // Ensure we're using the correct format for React Native
+            formData.append("resume", fileToUpload);
+          }
 
           console.log("File appended to FormData");
+
+          // Verify formData contents
+          if (formData._parts) {
+            for (let i = 0; i < formData._parts.length; i++) {
+              console.log(
+                `FormData part ${i}: key=${formData._parts[i][0]}, value=`,
+                typeof formData._parts[i][1] === "object"
+                  ? "File Object"
+                  : formData._parts[i][1]
+              );
+            }
+          }
         } catch (fileError) {
           console.error("Error preparing file:", fileError);
+          console.error(fileError.stack);
         }
       }
 
       console.log("Sending form data to server...");
 
-      // Send the request without specifying Content-Type header
-      const response = await fetch(`${API_URL}/api/submit/${form._id}`, {
-        method: "POST",
-        body: formData,
-      });
+      try {
+        // Send the request without manually setting Content-Type
+        const response = await fetch(`${API_URL}/api/submit/${form._id}`, {
+          method: "POST",
+          body: formData,
+        });
 
-      const data = await response.json();
-      console.log("Submission response:", data);
+        const data = await response.json();
+        console.log("Submission response:", data);
 
-      if (response.ok) {
-        Alert.alert(
-          "Success",
-          "Your application has been submitted successfully!",
-          [
-            {
-              text: "OK",
-              onPress: () => {
-                // Reset form
-                const initialResponses = {};
-                form.fields.forEach((field) => {
-                  if (field.type === "checkbox") {
-                    initialResponses[field.id] = false;
-                  } else {
-                    initialResponses[field.id] = "";
-                  }
-                });
-                setResponses(initialResponses);
-                setResumeFile(null);
+        if (response.ok) {
+          Alert.alert(
+            "Success",
+            "Your application has been submitted successfully!",
+            [
+              {
+                text: "OK",
+                onPress: () => {
+                  // Reset form
+                  const initialResponses = {};
+                  form.fields.forEach((field) => {
+                    if (field.type === "checkbox") {
+                      initialResponses[field.id] = false;
+                    } else {
+                      initialResponses[field.id] = "";
+                    }
+                  });
+                  setResponses(initialResponses);
+                  setResumeFile(null);
+                },
               },
-            },
-          ]
-        );
-      } else {
-        Alert.alert("Error", data.message || "Failed to submit form");
+            ]
+          );
+        } else {
+          Alert.alert("Error", data.message || "Failed to submit form");
+        }
+      } catch (error) {
+        console.error("Form submission error:", error);
+        Alert.alert("Error", "An unexpected error occurred");
+      } finally {
+        setSubmitting(false);
       }
     } catch (error) {
       console.error("Form submission error:", error);
       Alert.alert("Error", "An unexpected error occurred");
-    } finally {
-      setSubmitting(false);
     }
   };
 
